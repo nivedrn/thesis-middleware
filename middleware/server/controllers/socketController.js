@@ -42,54 +42,58 @@ module.exports = (io) => {
 			socket.join(sessionId);
 			console.log(socket.id + " joined ROOM ID:" + sessionId + " as " + mode);
 
-            
-            let sessionData = await retrieveSessionData(sessionId);
-            if(!sessionData){
-                console.log("Getting reset");
-                sessionData = {
+			let sessionData = await retrieveSessionData(sessionId);
+			if (!sessionData) {
+				console.log("Getting reset");
+				sessionData = {
 					workspaceData: [{}],
-                    participants: []
-
+					participants: [],
 				};
-            }
+			}
 
-            existingClient = sessionData.participants.find(item => item.id === clientDetails.id);
-            if(existingClient){
-                existingClient.name = clientDetails.name;
-            }else{                
-                clientDetails.color = fetchFromColorMap(sessionData.participants.length);
-                sessionData.participants.push(clientDetails);
-            }
-            
-            await storeSessionData(sessionId, sessionData);
+			existingClient = sessionData.participants.find(
+				(item) => item.id === clientDetails.id
+			);
+			if (existingClient) {
+				existingClient.name = clientDetails.name;
+				existingClient.socketId = socket.id;
+			} else {
+				clientDetails.color = fetchFromColorMap(
+					sessionData.participants.length
+				);
+				clientDetails.socketId = socket.id;
+				sessionData.participants.push(clientDetails);
+			}
 
-            if(mode == "participant"){
-                if (sessionData) {
-                    io.in(sessionId).emit("updateWorkspace", sessionData.workspaceData);
-                    console.log(sessionData);
-                } else {
-                    console.error(
-                        `Error: Delivery ID ${sessionId} not found in room data.`
-                    );
-                }
-            }
-            
-            io.in(sessionId).emit("updateParticipants", sessionData.participants);
+			await storeSessionData(sessionId, sessionData);
+
+			if (mode == "participant") {
+				if (sessionData) {
+					io.in(sessionId).emit("updateWorkspace", sessionData.workspaceData);
+					console.log(sessionData);
+				} else {
+					console.error(
+						`Error: Delivery ID ${sessionId} not found in room data.`
+					);
+				}
+			}
+
+			io.in(sessionId).emit("updateParticipants", sessionData.participants);
 		});
 
 		socket.on("update-workspace", async (sessionId, workspaceData) => {
 			let sessionData = await retrieveSessionData(sessionId);
-            console.log(JSON.stringify(workspaceData));
+			console.log(JSON.stringify(workspaceData));
 			if (!sessionData) {
 				sessionData = {
 					workspaceData: workspaceData,
-                    participants: []
+					participants: [],
 				};
 				await storeSessionData(sessionId, sessionData);
 			}
 
 			if (sessionData) {
-                sessionData.workspaceData = workspaceData;
+				sessionData.workspaceData = workspaceData;
 				await storeSessionData(sessionId, sessionData);
 				console.log(sessionData);
 			} else {
@@ -99,34 +103,69 @@ module.exports = (io) => {
 			}
 		});
 
-		socket.on("request-fileContents", (sessionId, requestedFilePath, callback) => {
-            console.log(sessionId + " request from " + socket.id + " for the file: " + requestedFilePath);
-			io.in(sessionId).emit("requestFileContents", sessionId, socket.id, requestedFilePath);
-		});
+		socket.on(
+			"request-fileContents",
+			(sessionId, requestedFilePath, callback) => {
+				console.log(
+					sessionId +
+						" request from " +
+						socket.id +
+						" for the file: " +
+						requestedFilePath
+				);
+				io.in(sessionId).emit(
+					"requestFileContents",
+					sessionId,
+					socket.id,
+					requestedFilePath
+				);
+			}
+		);
 
-		socket.on("response-fileContents", (sessionId, responseMessage, callback) => {
-            console.log(sessionId + " responseMessage " + JSON.stringify(responseMessage));
-			io.in(sessionId).emit("responseFileContents", responseMessage);
-		});
-        
+		socket.on(
+			"response-fileContents",
+			(sessionId, responseMessage, callback) => {
+				console.log(
+					sessionId + " responseMessage " + JSON.stringify(responseMessage)
+				);
+				io.in(sessionId).emit("responseFileContents", responseMessage);
+			}
+		);
+
 		socket.on("cursor-updates", (sessionId, cursorData) => {
-            console.log(sessionId + " responseMessage " + JSON.stringify(cursorData));
-            cursorData["clientId"] = socket.id;
+			console.log(sessionId + " responseMessage " + JSON.stringify(cursorData));
+			cursorData["clientId"] = socket.id;
 			io.in(sessionId).emit("cursorUpdates", cursorData);
 		});
 
 		socket.on("file-updates", (sessionId, fileChanges) => {
-            console.log(sessionId + " responseMessage " + JSON.stringify(fileChanges));
-            fileChanges["clientId"] = socket.id;
+			console.log(
+				sessionId + " responseMessage " + JSON.stringify(fileChanges)
+			);
+			fileChanges["clientId"] = socket.id;
 			io.in(sessionId).emit("fileContentUpdates", fileChanges);
 		});
 
 		socket.on("disconnecting", () => {
-			console.log("disconnecting from : ");
-			console.log(socket.rooms); // the Set contains at least the socket ID
+			console.log(socket.id, " disconnecting from : ");
+			console.log(socket.rooms);
 
-			socket.rooms.forEach(function (roomId) {
+			socket.rooms.forEach(async function (roomId) {
 				console.log(socket.id + " disconnecting from " + roomId);
+				let sessionData = await retrieveSessionData(roomId);
+				console.log(JSON.stringify(sessionData));
+
+				if (sessionData) {
+					const existingClientIndex = sessionData.participants.findIndex(
+						(item) => item.socketId === socket.id
+					);
+					if (existingClientIndex !== -1) {
+						sessionData.participants.splice(existingClientIndex, 1);
+						await storeSessionData(roomId, sessionData);
+						console.log(sessionData);
+						io.in(roomId).emit("updateParticipants", sessionData.participants);
+					}
+				}
 			});
 		});
 
